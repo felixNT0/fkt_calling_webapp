@@ -42,17 +42,20 @@ export default function RoomPage() {
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center">
       {loading && <Loader callConnection={true} />}
-      <AgoraUIVideoPlayer
-        setJoined={setJoined}
-        token={data?.token}
-        channelName={data?.slug || data?.title}
-        agoraAppId={data?.agoraAppId}
-        setLoading={setLoading}
-        userName={name}
-        creatorId={data?.user}
-        initialMic={initialMic}
-        initialVideo={initialVideo}
-      />
+      {joined && (
+        <AgoraUIVideoPlayer
+          meetingId={id}
+          setJoined={setJoined}
+          token={data?.token}
+          channelName={data?.slug || data?.title}
+          agoraAppId={data?.agoraAppId}
+          setLoading={setLoading}
+          userName={name}
+          creatorId={data?.creatorId}
+          initialMic={initialMic}
+          initialVideo={initialVideo}
+        />
+      )}
       {!joined && (
          <div className="fixed inset-0 bg-[#0B0F1A] flex flex-col items-center justify-center z-50 p-6 text-center">
             <div className="bg-cyan-500/10 p-5 rounded-full mb-8">

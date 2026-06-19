@@ -74,7 +74,7 @@ export const MeetingProvider = ({ children }: { children: ReactNode }) => {
         id: uuidv4(),
         slug: uniqueSlug, // Save the slug we generated
         agoraAppId,
-        user: user?.id || "guest",
+        creatorId: user?.id || "guest",
         accessLevel,
       });
     }

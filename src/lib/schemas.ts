@@ -8,6 +8,11 @@ export const meetingSchema = z.object({
   }),
   accessLevel: z.enum(["authenticated", "public"]).default("public"),
   slug: z.string().optional(),
+  creatorId: z.string().optional(),
+  token: z.string().nullable().optional(),
+  agoraAppId: z.string().optional(),
+  createAt: z.string().optional(),
+  id: z.string().optional(),
 });
 
 export const agoraTokenSchema = z.object({

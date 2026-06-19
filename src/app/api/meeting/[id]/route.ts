@@ -21,8 +21,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     const data = { id: doc.id, ...doc.data() };
     return NextResponse.json(data);
-  } catch (error) {
+  } catch (error: any) {
     console.error("[MEETING_ID_GET]", error);
+    if (error.code === 5) {
+      return NextResponse.json(
+        { error: "Database not initialized", details: "Firestore database was not found. Please ensure Firestore is created in your Firebase Console." }, 
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to fetch meeting", details: error instanceof Error ? error.message : "Unknown error" }, 
       { status: 500 }
@@ -47,8 +53,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await docRef.update(validation.data);
 
     return NextResponse.json({ id: docRef.id, ...validation.data });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[MEETING_ID_PUT]", error);
+    if (error.code === 5) {
+      return NextResponse.json(
+        { error: "Database not initialized", details: "Firestore database was not found. Please ensure Firestore is created in your Firebase Console." }, 
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to update meeting", details: error instanceof Error ? error.message : "Unknown error" }, 
       { status: 500 }
@@ -62,8 +74,14 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const docRef = db.collection("meeting").doc(id);
     await docRef.delete();
     return NextResponse.json({ message: "Item deleted successfully" });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[MEETING_ID_DELETE]", error);
+    if (error.code === 5) {
+      return NextResponse.json(
+        { error: "Database not initialized", details: "Firestore database was not found. Please ensure Firestore is created in your Firebase Console." }, 
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to delete meeting", details: error instanceof Error ? error.message : "Unknown error" }, 
       { status: 500 }

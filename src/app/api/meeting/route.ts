@@ -19,8 +19,14 @@ export async function GET() {
     const sortedMeetingData = parsedMeetingData.sort((a: any, b: any) => b.date - a.date);
     
     return NextResponse.json(sortedMeetingData);
-  } catch (error) {
+  } catch (error: any) {
     console.error("[MEETING_GET]", error);
+    if (error.code === 5) {
+      return NextResponse.json(
+        { error: "Database not initialized", details: "Firestore database was not found. Please ensure Firestore is created in your Firebase Console." }, 
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to fetch meetings", details: error instanceof Error ? error.message : "Unknown error" }, 
       { status: 500 }
@@ -47,8 +53,14 @@ export async function POST(req: Request) {
 
     const docRef = await db.collection("meeting").add(meetingData);
     return NextResponse.json({ id: docRef.id, ...meetingData }, { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[MEETING_POST]", error);
+    if (error.code === 5) {
+      return NextResponse.json(
+        { error: "Database not initialized", details: "Firestore database was not found. Please ensure Firestore is created in your Firebase Console." }, 
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to create meeting", details: error instanceof Error ? error.message : "Unknown error" }, 
       { status: 500 }

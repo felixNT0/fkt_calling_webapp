@@ -15,6 +15,7 @@ import {
 } from "react-icons/io5";
 
 function AgoraUIVideoPlayer({
+  meetingId,
   token,
   channelName,
   setJoined,
@@ -46,26 +47,59 @@ function AgoraUIVideoPlayer({
     );
   }, []);
 
+  const notifiedRef = React.useRef<Record<string, number>>({});
+
+  const [localUid] = useState(() => Math.floor(Math.random() * 100000));
+
   const rtcProps = {
     appId: agoraAppId || process.env.NEXT_PUBLIC_AGORA_APP_ID,
     channel: channelName,
     token: token === "null" || !token ? null : token,
-    uid: user?.id
-      ? Number(user.id.replace(/\D/g, "").slice(0, 8))
-      : Math.floor(Math.random() * 100000),
-    enableScreensharing: true,
+    uid: localUid,
+    enableScreensharing: false, // Disabled for now per request
     initialMicMuted: !initialMic,
     initialCameraMuted: !initialVideo,
+    CustomVideoPlaceholder: ({ user, isShown }: any) => {
+      if (!isShown) return null;
+      // Resolve the name from the participant state or fallback
+      const p = participants.find((p) => String(p.id) === String(user.uid));
+      const displayName = p
+        ? p.name
+        : user.uid === localUid
+          ? userName
+          : "Participant";
+      const initial = displayName ? displayName.charAt(0).toUpperCase() : "U";
+
+      return (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#0b0f1a] w-full h-full z-10">
+          <div className="w-24 h-24 bg-linear-to-br from-cyan-500 to-blue-600 rounded-full flex items-center justify-center text-4xl text-white font-black shadow-2xl border-4 border-[#0b0f1a]">
+            {initial}
+          </div>
+          <div className="absolute bottom-4 left-4 bg-slate-900/80 px-3 py-1.5 rounded-lg backdrop-blur-md border border-white/10">
+            <span className="text-white text-sm font-semibold tracking-wide flex items-center gap-2">
+              <IoMicOffOutline className="text-red-400" />
+              {displayName}
+            </span>
+          </div>
+        </div>
+      );
+    },
   };
 
-  React.useEffect(() => {
-    console.log("[AGORA_DEBUG] RTC Props:", {
-      appId: rtcProps.appId,
-      channel: rtcProps.channel,
-      hasToken: !!rtcProps.token,
-      uid: rtcProps.uid,
-    });
-  }, [rtcProps.appId, rtcProps.channel, rtcProps.token, rtcProps.uid]);
+  const rtmProps = {
+    username: userName || "Guest",
+    displayUsername: true,
+    uid: String(localUid),
+  };
+
+  // React.useEffect(() => {
+  //   console.log("[AGORA_DEBUG] RTC Props:", {
+  //     appId: rtcProps.appId,
+  //     channel: rtcProps.channel,
+  //     hasToken: !!rtcProps.token,
+  //     uid: rtcProps.uid,
+  //   });
+  // }, [rtcProps.appId, rtcProps.channel, rtcProps.token, rtcProps.uid]);
 
   const callbacks = {
     EndCall: () => setJoined(false),
@@ -75,12 +109,16 @@ function AgoraUIVideoPlayer({
     },
     ["user-joined"]: (user: any) => {
       joinSound.current?.play().catch(() => {});
-      message.info(`User ${user.uid} joined`);
+      const name =
+        user.uid && user.uid.toString().length > 5
+          ? "A participant"
+          : `User ${user.uid}`;
+      message.info(`${name} joined`);
       setParticipants((prev) => [
         ...prev,
         {
           id: user.uid,
-          name: `User ${user.uid}`,
+          name: name,
           isLocal: false,
           muted: false,
         },
@@ -88,19 +126,61 @@ function AgoraUIVideoPlayer({
     },
     ["user-left"]: (user: any) => {
       leaveSound.current?.play().catch(() => {});
-      message.info(`User ${user.uid} left`);
+      const name =
+        user.uid && user.uid.toString().length > 5
+          ? "A participant"
+          : `User ${user.uid}`;
+      message.info(`${name} left`);
       setParticipants((prev) => prev.filter((p) => p.id !== user.uid));
     },
     ["connection-state-change"](curState: any, _: any, reason: any): void {
       if (curState === "DISCONNECTED") {
         setLoading(false);
-        // Suppress "disconnected" message during initial setup or clean leave
         if (reason !== "LEAVE" && reason !== "REJOIN") {
-          // If we were never connected, don't show the error yet
-          // Only show error if we were actually in a call
-          console.log("Disconnected reason:", reason);
+          console.error(`[Agora] Disconnected reason:`, reason);
+          message.error(`Connection lost: ${reason}`);
         }
+      } else if (curState === "RECONNECTING") {
+        message.warning("Reconnecting to meeting...");
+      } else if (curState === "CONNECTED") {
+        console.log("[Agora] Connected successfully");
       }
+    },
+    ["user-published"]: (user: any, mediaType: "audio" | "video") => {
+      const key = `${user.uid}-${mediaType}-published`;
+      if (Date.now() - (notifiedRef.current[key] || 0) < 3000) return;
+      notifiedRef.current[key] = Date.now();
+
+      const name =
+        user.uid && user.uid.toString().length > 5
+          ? "A participant"
+          : `User ${user.uid}`;
+      message.success(`${name} unmuted their ${mediaType}`);
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === user.uid
+            ? { ...p, [mediaType === "audio" ? "muted" : "videoOff"]: false }
+            : p,
+        ),
+      );
+    },
+    ["user-unpublished"]: (user: any, mediaType: "audio" | "video") => {
+      const key = `${user.uid}-${mediaType}-unpublished`;
+      if (Date.now() - (notifiedRef.current[key] || 0) < 3000) return;
+      notifiedRef.current[key] = Date.now();
+
+      const name =
+        user.uid && user.uid.toString().length > 5
+          ? "A participant"
+          : `User ${user.uid}`;
+      message.warning(`${name} muted their ${mediaType}`);
+      setParticipants((prev) =>
+        prev.map((p) =>
+          p.id === user.uid
+            ? { ...p, [mediaType === "audio" ? "muted" : "videoOff"]: true }
+            : p,
+        ),
+      );
     },
   };
 
@@ -127,22 +207,35 @@ function AgoraUIVideoPlayer({
       position: "relative",
       flex: 1,
     },
-    localControlStyles: {
-      position: "absolute",
-      bottom: 40,
-      left: "50%",
-      transform: "translateX(-50%)",
-      height: 80,
-      backgroundColor: "rgba(17, 24, 39, 0.95)",
-      backdropFilter: "blur(32px)",
-      borderRadius: 24,
-      width: "fit-content",
+    localBtnContainer: {
+      backgroundColor: "#0f172a", // solid slate-900
+      borderTop: "1px solid rgba(255, 255, 255, 0.05)",
+      padding: "24px 0",
+      display: "flex",
+      justifyContent: "center",
+      gap: "24px",
+    },
+    BtnTemplateStyles: {
+      backgroundColor: "#1e293b",
+      borderColor: "transparent",
+      borderWidth: 0,
+      borderRadius: "50%",
+      width: 52,
+      height: 52,
       display: "flex",
       alignItems: "center",
-      padding: "0 30px",
-      border: "1px solid rgba(255, 255, 255, 0.15)",
-      boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.9)",
-      zIndex: 100,
+      justifyContent: "center",
+      boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+    },
+    localBtnStyles: {
+      endCall: {
+        backgroundColor: "#ef4444",
+        borderColor: "transparent",
+        borderWidth: 0,
+        borderRadius: "50%",
+        width: 52,
+        height: 52,
+      },
     },
     gridVideoContainer: {
       backgroundColor: "#0b0f1a",
@@ -152,58 +245,153 @@ function AgoraUIVideoPlayer({
     },
   };
 
-  const sendMessage = () => {
+  React.useEffect(() => {
+    if (!meetingId) return;
+    const fetchChat = async () => {
+      try {
+        const res = await fetch(`/api/meeting/${meetingId}/chat`);
+        if (res.ok) {
+          const newMessages = await res.json();
+          // Detect new message notification
+          if (messages.length > 0 && newMessages.length > messages.length) {
+            const latestMessage = newMessages[newMessages.length - 1];
+            if (latestMessage.sender !== userName) {
+              message.info(`New message from ${latestMessage.sender}`);
+            }
+          }
+          setMessages(newMessages);
+        }
+      } catch (err) {}
+    };
+    const interval = setInterval(fetchChat, 2500); // Fast 2.5s polling
+    fetchChat(); // Initial fetch
+    return () => clearInterval(interval);
+  }, [meetingId, messages.length, userName]);
+
+  const sendMessage = async () => {
     if (!messageInput.trim()) return;
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: userName,
-        text: messageInput,
-        time: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    ]);
+    const payload = {
+      sender: userName,
+      text: messageInput,
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+
+    // Optimistic UI update
+    setMessages((prev) => [...prev, payload]);
     setMessageInput("");
+
+    if (meetingId) {
+      await fetch(`/api/meeting/${meetingId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
   };
 
-  const summarizeMeeting = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setSummary(
-        "The meeting covered the upcoming Q3 project milestones, deployment strategies for the new CRM module, and budget allocation for AI research. Action items: Sarah to finalize the API docs, Marcus to review the frontend components.",
-      );
-      setLoading(false);
+  const summarizeMeeting = async () => {
+    message.loading({
+      content: "Generating AI Insights...",
+      key: "ai-summary",
+      duration: 2,
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      let dynamicSummary = "The meeting was focused and concise.";
+      if (messages.length > 0) {
+        const senders = [...new Set(messages.map((m) => m.sender))].filter(
+          (s) => s !== "System",
+        );
+        const topics = messages.map((m) => m.text).join(" ");
+        dynamicSummary = `Participants (${senders.join(", ")}) engaged in an active discussion. Key conversational highlights included: "${messages[messages.length - 1].text}". Action items: Review shared materials and follow up on the chat history.`;
+      }
+
+      setSummary(dynamicSummary);
+      message.success({
+        content: "AI Summary successfully generated!",
+        key: "ai-summary",
+      });
       setShowAI(true);
-    }, 2000);
+    } catch (e) {
+      message.error({
+        content: "Failed to generate AI summary.",
+        key: "ai-summary",
+      });
+    }
   };
 
   const [showParticipants, setShowParticipants] = useState(false);
   const [participants, setParticipants] = useState<any[]>([
-    { id: user?.id || "local", name: userName || "You", isLocal: true },
+    {
+      id: user?.id || "local",
+      name: userName || "You",
+      isLocal: true,
+      muted: !initialMic,
+      videoOff: !initialVideo,
+    },
   ]);
 
   return (
-    <div className=" inset-0 w-screen h-screen bg-[#0b0f1a] overflow-hidden font-outfit z-50">
-      <div className="flex w-full h-full ">
+    <div className="inset-0 w-screen h-screen bg-[#0b0f1a] overflow-hidden font-outfit z-50">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        /* Default: Videos should cover their area to remove gaps */
+        video {
+          object-fit: cover !important;
+        }
+        /* Make the bottom bar look more modern */
+        .agora-btn-container {
+          box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+          padding-bottom: 24px !important;
+          z-index: 99 !important;
+        }
+        /* Force Agora UIKit internal buttons to drop all borders */
+        .agora-btn-container > div, .agora-btn-container button {
+          border: none !important;
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        /* Fix remote videos being inversely mirrored (Y-axis) */
+        .agora-video-view:not(.local-video) video {
+          transform: rotateY(0deg) !important;
+        }
+        /* Only mirror the local user's video so it acts like a mirror */
+        .agora-video-view.local-video video, div[id^="local"] video {
+          transform: rotateY(180deg) !important;
+        }
+        /* Screen share video (uid usually starts with 'screen' or isn't camera) must NOT be mirrored or cropped */
+        video[srcObject*="MediaStream"] {
+          object-fit: contain !important; /* Allow screen share to show fully without cropping */
+        }
+      `,
+        }}
+      />
+      <div className="flex w-full h-full relative">
         <AgoraUIKit
+          // layout={1}
           rtcProps={rtcProps}
+          rtmProps={rtmProps}
           callbacks={callbacks}
           styleProps={styleProps as any}
         />
 
-        {/* Custom Controls for Chat, AI & Participants */}
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-[999] pointer-events-auto">
+        {/* Custom Controls for Chat, AI & Participants - Positioned bottom right like Meet/Zoom */}
+        <div className="absolute right-6 bottom-3 flex flex-row items-center gap-3 z-[999] pointer-events-auto">
           <button
             onClick={(e) => {
               e.stopPropagation();
               setShowChat(!showChat);
               setShowParticipants(false);
             }}
-            className={`p-4 rounded-2xl backdrop-blur-3xl border transition-all cursor-pointer relative z-[1000] ${showChat ? "bg-cyan-500 text-white border-cyan-400" : "bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white"}`}
+            className={`w-12 h-12 flex items-center justify-center rounded-full transition-all cursor-pointer shadow-lg backdrop-blur-xl ${showChat ? "bg-cyan-500 text-white shadow-cyan-500/40" : "bg-white/10 text-white hover:bg-white/20 border border-white/5"}`}
+            title="Chat"
           >
-            <IoChatbubbleOutline size={24} />
+            <IoChatbubbleOutline size={20} />
           </button>
           <button
             onClick={(e) => {
@@ -211,34 +399,40 @@ function AgoraUIVideoPlayer({
               setShowParticipants(!showParticipants);
               setShowChat(false);
             }}
-            className={`p-4 curso rounded-2xl backdrop-blur-3xl border transition-all cursor-pointer relative z-[1000] ${showParticipants ? "bg-cyan-500 text-white border-cyan-400" : "bg-white/5 text-slate-400 border-white/10 hover:bg-white/10 hover:text-white"}`}
+            className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all cursor-pointer shadow-lg ${showParticipants ? "bg-cyan-500 text-white shadow-cyan-500/40" : "bg-white/10 text-white hover:bg-white/20 border border-white/5"}`}
+            title="Participants"
           >
-            <IoPeopleOutline size={24} />
+            <IoPeopleOutline size={22} />
           </button>
           {isHost && (
             <button
               onClick={summarizeMeeting}
-              className="p-4 bg-white/5 text-slate-400 rounded-2xl backdrop-blur-3xl border border-white/10 hover:bg-cyan-500 hover:text-white hover:border-cyan-400 transition-all group cursor-pointer relative z-[1000]"
+              className="w-12 h-12 flex items-center justify-center bg-white/10 text-amber-400 rounded-2xl hover:bg-amber-500 hover:text-white border border-white/5 transition-all group cursor-pointer shadow-lg"
               title="Generate AI Meeting Summary"
             >
               <IoSparklesOutline
-                size={24}
+                size={22}
                 className="group-hover:animate-pulse"
               />
             </button>
           )}
 
-          {/* HIDDEN AGORA FALLBACK: If user sees "dynamic use static key" error, they can click this to force a join with no token */}
+          {/* HIDDEN AGORA FALLBACK 
           <button
             onClick={() => {
               message.warning("Attempting Force Join (Static Mode)...");
-              window.location.reload(); // Force refresh to retry if stuck
+              window.location.reload();
             }}
-            className="p-4 bg-red-500/10 text-red-500/30 rounded-2xl border border-red-500/10 hover:text-red-500 hover:bg-red-500/20 transition-all cursor-pointer scale-75"
+            className="w-12 h-12 flex flex-col items-center justify-center bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white border border-red-500/20 transition-all cursor-pointer shadow-lg"
             title="Force Join Fallback (Use ONLY if connection fails)"
           >
-            <span className="text-[8px] font-black uppercase">Force Join</span>
+            <span className="text-[7px] font-black uppercase text-center leading-[1.1]">
+              Force
+              <br />
+              Join
+            </span>
           </button>
+          */}
         </div>
       </div>
 
@@ -250,7 +444,7 @@ function AgoraUIVideoPlayer({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 30, stiffness: 200 }}
-            className="w-96 bg-slate-900/95 backdrop-blur-3xl border-l border-white/10 flex flex-col shadow-2xl relative z-30"
+            className="absolute right-0 top-0 bottom-0 w-96 bg-slate-900/95 backdrop-blur-3xl border-l border-white/10 flex flex-col shadow-2xl z-[1000]"
           >
             <div className="p-6 border-b border-white/5 flex items-center justify-between">
               <h3 className="text-white font-black uppercase tracking-widest flex items-center gap-3">
@@ -328,7 +522,7 @@ function AgoraUIVideoPlayer({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
             transition={{ type: "spring", damping: 30, stiffness: 200 }}
-            className="w-96 bg-slate-900/95 backdrop-blur-3xl border-l border-white/10 flex flex-col shadow-2xl relative z-30"
+            className="absolute right-0 top-0 bottom-0 w-96 bg-slate-900/95 backdrop-blur-3xl border-l border-white/10 flex flex-col shadow-2xl z-[1000]"
           >
             <div className="p-6 border-b border-white/5 flex items-center justify-between">
               <h3 className="text-white font-black uppercase tracking-widest flex items-center gap-3">
@@ -381,7 +575,7 @@ function AgoraUIVideoPlayer({
                 />
                 <button
                   onClick={sendMessage}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-cyan-500 p-2 hover:bg-cyan-500/10 rounded-lg transition-all cursor-pointer"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-cyan-500 p-2 hover:bg-cyan-500/10 rounded-lg transition-all cursor-pointer flex items-center justify-center"
                 >
                   <svg
                     className="w-5 h-5 fill-current rotate-90"
